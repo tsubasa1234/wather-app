@@ -1,95 +1,178 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <title>東京の週間天気</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <style>
-    body {
-      font-family: sans-serif;
-      max-width: 700px;
-      margin: 40px auto;
-      padding: 0 20px;
-      background: #fff;
-      color: #333;
-    }
-    h1 { font-size: 1.4rem; margin-bottom: 24px; }
-    canvas { width: 100% !important; }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 32px;
-      font-size: 0.9rem;
-    }
-    th, td {
-      text-align: center;
-      padding: 8px;
-      border-bottom: 1px solid #eee;
-    }
-    th { color: #888; font-weight: normal; }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{{ city_label }}の天気予報</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  body {
+    font-family: sans-serif;
+    max-width: 760px;
+    margin: 40px auto;
+    padding: 0 20px;
+    background: #fff;
+    color: #333;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 16px; }
+  h2 { font-size: 1.05rem; margin: 40px 0 12px; color: #555; }
+  form.search {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 24px;
+  }
+  select, input[type="text"], button {
+    font-size: 0.95rem;
+    padding: 8px 10px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    background: #fff;
+  }
+  input[type="text"] { flex: 1; min-width: 160px; }
+  button { background: #333; color: #fff; border-color: #333; cursor: pointer; }
+  .hint { font-size: 0.8rem; color: #888; margin: -12px 0 24px; }
+  canvas { width: 100% !important; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 32px;
+    font-size: 0.9rem;
+  }
+  th, td { text-align: center; padding: 8px; border-bottom: 1px solid #eee; }
+  th { color: #888; font-weight: normal; }
+  .error { color: #c0392b; background: #fdecea; padding: 12px 14px; border-radius: 6px; }
+</style>
 </head>
 <body>
-  <h1>東京の週間天気</h1>
+<h1>{{ city_label }}の天気予報</h1>
 
-  {% if error %}
-    <p style="color:red">エラー: {{ error }}</p>
-  {% else %}
-  <canvas id="chart"></canvas>
-  {% endif %}
-
-  <table>
-    <tr>
-      <th>日付</th>
-      <th>天気</th>
-      <th>最高</th>
-      <th>最低</th>
-    </tr>
-    {% for d in forecast %}
-    <tr>
-      <td>{{ d.date }}</td>
-      <td>{{ d.desc }}</td>
-      <td>{{ d.temp_max }}°C</td>
-      <td>{{ d.temp_min }}°C</td>
-    </tr>
+<form class="search" method="get">
+  <select name="city" aria-label="都市を選ぶ" onchange="this.form.q.value=''; this.form.submit()">
+    {% if not selected %}<option value="" selected>（自由入力）</option>{% endif %}
+    {% for c in cities %}
+    <option value="{{ c }}" {% if c == selected %}selected{% endif %}>{{ c }}</option>
     {% endfor %}
-  </table>
+  </select>
+  <input type="text" name="q" value="{{ q }}" placeholder="都市名で検索（例: Kyoto, Paris）" aria-label="都市名で検索" />
+  <button type="submit">表示</button>
+</form>
+<p class="hint">プルダウンで選ぶか、都市名（ローマ字推奨）を入力して「表示」を押してください。</p>
 
-  <script>
-    const labels = [{% for d in forecast %}"{{ d.date }}",{% endfor %}];
-    const high   = [{% for d in forecast %}{{ d.temp_max }},{% endfor %}];
-    const low    = [{% for d in forecast %}{{ d.temp_min }},{% endfor %}];
+{% if error %}
+<p class="error">{{ error }}</p>
+{% else %}
 
-    new Chart(document.getElementById("chart"), {
-      type: "line",
-      data: {
-        labels,
-        datasets: [
-          {
-            label: "最高気温",
-            data: high,
-            borderColor: "#e74c3c",
-            backgroundColor: "rgba(231,76,60,0.08)",
-            tension: 0.3,
-            fill: true,
-          },
-          {
-            label: "最低気温",
-            data: low,
-            borderColor: "#3498db",
-            backgroundColor: "rgba(52,152,219,0.08)",
-            tension: 0.3,
-            fill: true,
-          },
-        ],
+<h2>5日間の予報</h2>
+<canvas id="dailyChart"></canvas>
+
+<table>
+  <tr>
+    <th>日付</th>
+    <th>天気</th>
+    <th>最高</th>
+    <th>最低</th>
+    <th>降水確率</th>
+  </tr>
+  {% for d in forecast %}
+  <tr>
+    <td>{{ d.date }}</td>
+    <td>{{ d.desc }}</td>
+    <td>{{ d.temp_max }}°C</td>
+    <td>{{ d.temp_min }}°C</td>
+    <td>{{ d.pop }}%</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>今日・明日の3時間ごとの予報</h2>
+<canvas id="hourlyChart"></canvas>
+
+{{ forecast|json_script:"forecast-data" }}
+{{ hourly|json_script:"hourly-data" }}
+
+<script>
+const forecast = JSON.parse(document.getElementById("forecast-data").textContent);
+const hourly = JSON.parse(document.getElementById("hourly-data").textContent);
+
+// 降水確率の棒グラフ（右軸 0〜100%）と、気温の折れ線（左軸）を重ねる共通設定
+function makeOptions() {
+  return {
+    interaction: { mode: "index", intersect: false },
+    plugins: { legend: { position: "top" } },
+    scales: {
+      y: {
+        position: "left",
+        ticks: { callback: v => v + "°C" },
       },
-      options: {
-        plugins: { legend: { position: "top" } },
-        scales: {
-          y: { ticks: { callback: v => v + "°C" } },
-        },
+      yPop: {
+        position: "right",
+        min: 0,
+        max: 100,
+        grid: { drawOnChartArea: false },
+        ticks: { callback: v => v + "%" },
       },
-    });
-  </script>
+    },
+  };
+}
+
+const popBar = (label, data) => ({
+  type: "bar",
+  label,
+  data,
+  yAxisID: "yPop",
+  backgroundColor: "rgba(52,152,219,0.25)",
+  borderWidth: 0,
+  order: 2,
+});
+
+new Chart(document.getElementById("dailyChart"), {
+  data: {
+    labels: forecast.map(d => d.date),
+    datasets: [
+      popBar("降水確率", forecast.map(d => d.pop)),
+      {
+        type: "line",
+        label: "最高気温",
+        data: forecast.map(d => d.temp_max),
+        borderColor: "#e74c3c",
+        tension: 0.3,
+        order: 1,
+      },
+      {
+        type: "line",
+        label: "最低気温",
+        data: forecast.map(d => d.temp_min),
+        borderColor: "#2c3e50",
+        tension: 0.3,
+        order: 1,
+      },
+    ],
+  },
+  options: makeOptions(),
+});
+
+new Chart(document.getElementById("hourlyChart"), {
+  data: {
+    labels: hourly.map(h => h.label),
+    datasets: [
+      popBar("降水確率", hourly.map(h => h.pop)),
+      {
+        type: "line",
+        label: "気温",
+        data: hourly.map(h => h.temp),
+        borderColor: "#e67e22",
+        backgroundColor: "rgba(230,126,34,0.08)",
+        fill: true,
+        tension: 0.3,
+        order: 1,
+      },
+    ],
+  },
+  options: makeOptions(),
+});
+</script>
+{% endif %}
 </body>
 </html>
